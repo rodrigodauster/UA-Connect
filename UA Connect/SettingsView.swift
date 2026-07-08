@@ -9,7 +9,10 @@ import AVFoundation
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
 
-    private var ukrainianVoices: [AVSpeechSynthesisVoice] {
+    // Loaded once on appear rather than recomputed on every render.
+    @State private var ukrainianVoices: [AVSpeechSynthesisVoice] = []
+
+    private static func loadUkrainianVoices() -> [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language == "uk-UA" }
             .sorted { lhs, rhs in
@@ -80,6 +83,11 @@ struct SettingsView: View {
                 )
             }
             .padding(24)
+        }
+        .onAppear {
+            if ukrainianVoices.isEmpty {
+                ukrainianVoices = Self.loadUkrainianVoices()
+            }
         }
     }
 }

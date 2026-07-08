@@ -28,11 +28,21 @@ struct GameView: View {
     @State private var bounceOffsets: [UUID: CGFloat] = [:]
     @State private var collapsingTiles: Set<UUID> = []
 
+    // Measured content width of the board, used to derive the square tile side.
+    @State private var boardContentWidth: CGFloat = 0
+
     // Misc
     @State private var showAlphabet = false
+    @State private var speakOnSelect = false          // when on, each selected word is spoken
     @State private var synthesizer = AVSpeechSynthesizer()
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
+
+    // Square tile side = column width, derived from the measured board width.
+    private var tileSide: CGFloat {
+        guard boardContentWidth > 0 else { return 0 }
+        return (boardContentWidth - 4 * 3) / 4   // subtract the three 4pt gaps
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,14 +51,14 @@ struct GameView: View {
             Spacer(minLength: 0)
 
             if game != nil {
-                VStack(spacing: 8) {
+                VStack(spacing: 4) {
                     // Solved category banners, in guess order.
                     ForEach(solved) { solvedCategory in
-                        CategoryBanner(solved: solvedCategory)
+                        CategoryBanner(solved: solvedCategory, height: tileSide)
                     }
 
                     // Remaining active tiles.
-                    LazyVGrid(columns: columns, spacing: 8) {
+                    LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(tiles) { tile in
                             TileView(
                                 tile: tile,
@@ -60,11 +70,20 @@ struct GameView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { boardContentWidth = proxy.size.width }
+                            .onChange(of: proxy.size.width) { newWidth in
+                                boardContentWidth = newWidth
+                            }
+                    }
+                )
+                .padding(.horizontal, 8)
 
                 submitArea
                     .padding(.horizontal, 16)
-                    .padding(.top, 24)
+                    .padding(.top, 48)
             } else {
                 Text("Select at least four theme packs to play.")
                     .font(.system(size: 16))
@@ -139,14 +158,14 @@ struct GameView: View {
                 Button(action: submit) {
                     Text("Submit")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(ready ? .black : Color(white: 0.5))
+                        .foregroundColor(ready ? .white : Color(white: 0.4))
                         .padding(.horizontal, 32)
                         .frame(height: 52)
-                        .background(ready ? Color.white : Color(white: 0.15))
+                        .background(Color.black)
                         .clipShape(Capsule())
                         .overlay(
                             Capsule()
-                                .strokeBorder(ready ? Color.clear : Color(white: 0.35), lineWidth: 1)
+                                .strokeBorder(ready ? Color.white : Color(white: 0.4), lineWidth: 1)
                         )
                 }
                 .disabled(!ready)
@@ -165,14 +184,13 @@ struct GameView: View {
                 .frame(height: 1)
 
             HStack {
-                // Left: speak the selected tiles (Ukrainian).
-                Button(action: speakSelection) {
-                    Image(systemName: "message.fill")
+                // Left: speak-on-select toggle. Filled bubble = on, outline = off.
+                Button(action: { speakOnSelect.toggle() }) {
+                    Image(systemName: speakOnSelect ? "message.fill" : "message")
                         .font(.system(size: 20))
-                        .foregroundColor(selected.isEmpty ? Color(white: 0.4) : Color(white: 0.75))
+                        .foregroundColor(speakOnSelect ? .white : Color(white: 0.4))
                         .frame(width: 44, height: 44)
                 }
-                .disabled(selected.isEmpty)
 
                 Spacer()
 
@@ -207,6 +225,7 @@ struct GameView: View {
             selected.remove(at: index)
         } else if selected.count < 4 {
             selected.append(tile.id)
+            if speakOnSelect { speak(tile.ua) }
         }
     }
 
@@ -342,24 +361,19 @@ struct GameView: View {
 
     // MARK: - Speech
 
-    private func speakSelection() {
-        let words = tiles.filter { selected.contains($0.id) }.map(\.ua)
-        guard !words.isEmpty else { return }
-
+    private func speak(_ word: String) {
         configureAudioSession()
         synthesizer.stopSpeaking(at: .immediate)
 
-        for word in words {
-            let utterance = AVSpeechUtterance(string: word)
-            if let id = appState.selectedVoiceIdentifier,
-               let voice = AVSpeechSynthesisVoice(identifier: id) {
-                utterance.voice = voice
-            } else {
-                utterance.voice = AVSpeechSynthesisVoice(language: "uk-UA")
-            }
-            utterance.rate = 0.5
-            synthesizer.speak(utterance)
+        let utterance = AVSpeechUtterance(string: word)
+        if let id = appState.selectedVoiceIdentifier,
+           let voice = AVSpeechSynthesisVoice(identifier: id) {
+            utterance.voice = voice
+        } else {
+            utterance.voice = AVSpeechSynthesisVoice(language: "uk-UA")
         }
+        utterance.rate = 0.5
+        synthesizer.speak(utterance)
     }
 
     private func configureAudioSession() {
@@ -379,19 +393,24 @@ private struct TileView: View {
     let isCollapsing: Bool
 
     var body: some View {
-        Text(tile.ua)
-            .font(.system(size: 15, weight: .bold))
-            .minimumScaleFactor(0.4)
-            .lineLimit(2)
-            .multilineTextAlignment(.center)
-            .foregroundColor(isSelected ? .white : .black)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 4)
+        // The rounded rectangle drives sizing: with no intrinsic size it
+        // expands to the full column width and takes a matching (square)
+        // height, so tiles fill their cells. The word is overlaid on top.
+        RoundedRectangle(cornerRadius: 8)
+            .fill(isSelected ? Color(red: 0x5A / 255, green: 0x5A / 255, blue: 0x5A / 255)
+                             : Color(red: 0xEF / 255, green: 0xEF / 255, blue: 0xEF / 255))
+            .aspectRatio(1.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 3.0, contentMode: .fit)
-            .background(isSelected ? Color(red: 0x5A / 255, green: 0x5A / 255, blue: 0x5A / 255)
-                                   : Color(red: 0xEF / 255, green: 0xEF / 255, blue: 0xEF / 255))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(
+                Text(tile.ua)
+                    .font(.system(size: 24, weight: .bold))
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(isSelected ? .white : .black)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 4)
+            )
             .offset(y: offset)
             .scaleEffect(isCollapsing ? 0 : 1)
             .opacity(isCollapsing ? 0 : 1)
@@ -402,15 +421,17 @@ private struct TileView: View {
 
 private struct CategoryBanner: View {
     let solved: SolvedCategory
+    /// Pinned to the tile side so a banner is exactly as tall as one tile.
+    let height: CGFloat
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1.2) {
             Text(solved.category.theme.uppercased())
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 24, weight: .bold))
             Text(solved.category.uaWords.joined(separator: ", "))
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: 24, weight: .regular))
             Text(solved.category.enWords.joined(separator: ", "))
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: 24, weight: .regular))
                 .opacity(0.75)
         }
         .foregroundColor(.black)
@@ -418,8 +439,9 @@ private struct CategoryBanner: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
+        .frame(height: height > 0 ? height : nil)
         .background(solved.color.color)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

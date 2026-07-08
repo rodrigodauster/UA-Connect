@@ -7,7 +7,7 @@ import SwiftUI
 
 // MARK: - Vocabulary
 
-struct FlashCard: Identifiable, Codable {
+struct FlashCard: Identifiable, Codable, Sendable {
     let id: UUID
     let ua: String
     let en: String
@@ -127,5 +127,14 @@ struct Game {
 
     func category(for id: UUID) -> GameCategory? {
         categories.first { $0.id == id }
+    }
+
+    /// An order-independent fingerprint of the 16 words in play, used to
+    /// detect (and avoid) replaying the exact same selection back-to-back.
+    var signature: String {
+        categories
+            .flatMap { category in category.cards.map { "\(category.theme)|\($0.ua)" } }
+            .sorted()
+            .joined(separator: ",")
     }
 }

@@ -111,16 +111,31 @@ class AppState: ObservableObject {
         saveSelectedDecks()
     }
 
+    /// Fingerprint of the most recent game, so a replay can pick different words.
+    private var lastGameSignature: String?
+
     /// Builds a fresh game: picks 4 random eligible themes from the selection,
     /// and 4 random words from each. Themes must have at least 4 cards to qualify.
+    /// The selection is re-randomised each call and, where the vocabulary allows,
+    /// differs from the previous game's set of words.
     func makeGame() -> Game? {
-        let eligible = decks
-            .filter { selectedDeckIds.contains($0.id) && $0.cards.count >= 4 }
-            .shuffled()
-
+        let eligible = decks.filter { selectedDeckIds.contains($0.id) && $0.cards.count >= 4 }
         guard eligible.count >= 4 else { return nil }
 
-        let chosenThemes = Array(eligible.prefix(4))
+        // Try a handful of times to land on a word set different from last time.
+        // With limited vocabulary (exactly 4 themes of 4 words) no other set
+        // exists, so we fall back to the last candidate after the attempts.
+        var candidate = buildGame(from: eligible)
+        for _ in 0..<12 where candidate.signature == lastGameSignature {
+            candidate = buildGame(from: eligible)
+        }
+
+        lastGameSignature = candidate.signature
+        return candidate
+    }
+
+    private func buildGame(from eligible: [Deck]) -> Game {
+        let chosenThemes = Array(eligible.shuffled().prefix(4))
         var categories: [GameCategory] = []
 
         for (index, deck) in chosenThemes.enumerated() {
@@ -131,6 +146,10 @@ class AppState: ObservableObject {
         return Game(categories: categories)
     }
 
+    /// Reads and parses the CSV. The security-scoped URL handed back by
+    /// `.fileImporter` is only accessible from the picker's callback context,
+    /// so the access must be started here synchronously — deferring it to a
+    /// detached task loses the grant and the read silently fails.
     func importCSV(from url: URL) {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
@@ -138,10 +157,25 @@ class AppState: ObservableObject {
         guard let data = try? Data(contentsOf: url),
               let content = String(data: data, encoding: .utf8) else { return }
 
-        var themeCards: [String: [FlashCard]] = [:]
-        let rows = parseCSV(content)
+        let themeCards = Self.parseThemeCards(from: content)
+        mergeImportedCards(themeCards)
+    }
 
-        for fields in rows {
+    private func mergeImportedCards(_ themeCards: [String: [FlashCard]]) {
+        for (theme, cards) in themeCards {
+            if let existingIndex = decks.firstIndex(where: { $0.theme == theme }) {
+                decks[existingIndex].cards.append(contentsOf: cards)
+            } else {
+                decks.append(Deck(theme: theme, cards: cards))
+            }
+        }
+        saveDecks()
+    }
+
+    private static func parseThemeCards(from content: String) -> [String: [FlashCard]] {
+        var themeCards: [String: [FlashCard]] = [:]
+
+        for fields in parseCSV(content) {
             guard fields.count >= 3 else { continue }
 
             let theme = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -151,22 +185,13 @@ class AppState: ObservableObject {
             if theme.isEmpty || ua.isEmpty || en.isEmpty { continue }
             if theme.lowercased() == "theme" { continue }
 
-            let card = FlashCard(ua: ua, en: en)
-            themeCards[theme, default: []].append(card)
+            themeCards[theme, default: []].append(FlashCard(ua: ua, en: en))
         }
 
-        for (theme, cards) in themeCards {
-            if let existingIndex = decks.firstIndex(where: { $0.theme == theme }) {
-                decks[existingIndex].cards.append(contentsOf: cards)
-            } else {
-                decks.append(Deck(theme: theme, cards: cards))
-            }
-        }
-
-        saveDecks()
+        return themeCards
     }
 
-    private func parseCSV(_ content: String) -> [[String]] {
+    private static func parseCSV(_ content: String) -> [[String]] {
         var rows: [[String]] = []
         var fields: [String] = []
         var current = ""
