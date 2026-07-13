@@ -403,7 +403,7 @@ private struct TileView: View {
             .frame(maxWidth: .infinity)
             .overlay(
                 Text(tile.ua)
-                    .font(.system(size: 24, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .minimumScaleFactor(0.4)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -427,11 +427,11 @@ private struct CategoryBanner: View {
     var body: some View {
         VStack(spacing: 1.2) {
             Text(solved.category.theme.uppercased())
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 18, weight: .bold))
             Text(solved.category.uaWords.joined(separator: ", "))
-                .font(.system(size: 24, weight: .regular))
+                .font(.system(size: 18, weight: .regular))
             Text(solved.category.enWords.joined(separator: ", "))
-                .font(.system(size: 24, weight: .regular))
+                .font(.system(size: 18, weight: .regular))
                 .opacity(0.75)
         }
         .foregroundColor(.black)

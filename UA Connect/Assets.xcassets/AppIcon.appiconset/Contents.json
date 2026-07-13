@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "Icon_UA_Connect.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
